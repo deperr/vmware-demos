@@ -37,3 +37,21 @@
         label: "{{ vm_item.name }}"
       vmware.vmware_rest.vcenter_vm_hardware_cdrom_info:
         vm: "{{ vm_item.vm }}"
+
+    - name: Identify VMs with CD-ROM devices attached
+      when: 
+        - vm_cdrom_check.results is defined
+        - cdrom_result.value is defined
+        - cdrom_result.value | length > 0
+      loop: "{{ vm_cdrom_check.results }}"
+      loop_control:
+        loop_var: cdrom_result
+        label: "{{ cdrom_result.vm_item.name }}"
+      ansible.builtin.set_fact:
+        vms_with_cdrom: "{{ vms_with_cdrom + [{'vm_id': cdrom_result.vm_item.vm, 'vm_name': cdrom_result.vm_item.name, 'power_state': cdrom_result.vm_item.power_state, 'cdrom_devices': cdrom_result.value}] }}"
+
+    - name: Display VMs with CD-ROM devices
+      ansible.builtin.debug:
+        msg: 
+          - "Found {{ vms_with_cdrom | length }} VMs with CD-ROM devices attached"
+          - "VMs with CD-ROM: {{ vms_with_cdrom | map(attribute='vm_name') | list }}"
