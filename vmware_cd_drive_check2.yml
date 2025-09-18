@@ -61,8 +61,9 @@
           - "CD-ROM Devices: {{ vm_with_cdrom.cdrom_devices | length }}"
           - "Device Details: {{ vm_with_cdrom.cdrom_devices }}"
 
+# Second play to get into the Linux VM's to dismount
 - name: Dismount CD drives from Linux VMs using multiple discrete tasks
-  hosts: vms_with_cdrom
+  hosts: vm_with_cdrom
   gather_facts: false
   become: true
 
