@@ -22,3 +22,18 @@
     - name: Display connection status
       ansible.builtin.debug:
         msg: "Successfully connected to vCenter: {{ vcenter_hostname }}"
+
+    - name: Initialize variables for CD-ROM tracking
+      ansible.builtin.set_fact:
+        vms_with_cdrom: []
+        cdrom_detachment_results: []
+        current_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
+    - name: Check each VM for CD-ROM devices
+      register: vm_cdrom_check
+      loop: "{{ all_vms.value }}"
+      loop_control:
+        loop_var: vm_item
+        label: "{{ vm_item.name }}"
+      vmware.vmware_rest.vcenter_vm_hardware_cdrom_info:
+        vm: "{{ vm_item.vm }}"
