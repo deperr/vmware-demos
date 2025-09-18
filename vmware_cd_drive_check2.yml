@@ -63,7 +63,7 @@
 
 # Second play to get into the Linux VM's to dismount
 - name: Dismount CD drives from Linux VMs using multiple discrete tasks
-  hosts: vm_with_cdrom
+  hosts: vms_with_cdrom.vm_name
   gather_facts: false
   become: true
 
