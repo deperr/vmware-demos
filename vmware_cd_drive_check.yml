@@ -4,21 +4,6 @@
   hosts: localhost
   become: true
 
-  vars:
-    vcenter_validate_certs: true
-    report_only: false
-    
-    # Report server configuration
-    report_server_user: ansible
-    # report_server_key: /path/to/private/key (optional - uses default SSH key if not specified)
-    
-  module_defaults:
-    vmware.vmware_rest.vcenter_host:
-      vcenter_host: "{{ vcenter_hostname }}"
-      vcenter_username: "{{ vcenter_username }}"  
-      vcenter_password: "{{ vcenter_password }}"
-      vcenter_validate_certs: "{{ vcenter_validate_certs }}"
-
   tasks:
 
     - name: Retrieve all virtual machines from vCenter
