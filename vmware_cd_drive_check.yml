@@ -60,13 +60,20 @@
           - "CD-ROM Devices: {{ vm_with_cdrom.cdrom_devices | length }}"
           - "Device Details: {{ vm_with_cdrom.cdrom_devices }}"
 
-    - name: Dismount CD disks inside of the host OS
-      when: 
-        - vms_with_cdrom | length > 0
+    - name: Create dynamic inventory for powered-on VMs
+      when: vms_with_cdrom | length > 0
+      loop: "{{ vms_with_cdrom | selectattr('power_state', 'equalto', 'POWERED_ON') | list }}"
+      loop_control:
+        loop_var: vm_item
+      ansible.builtin.add_host:
+        name: "{{ vm_item.vm_name }}"
+        groups: linux_vms_with_cdrom
+        vm_id: "{{ vm_item.vm_id }}"
+        cdrom_devices: "{{ vm_item.cdrom_devices }}"
 
-    - name: Kick off the process CD-ROM detachment
-      when: 
-        - vms_with_cdrom | length > 0
+    - name: Set fact for all VMs with CD-ROM for later use
+      ansible.builtin.set_fact:
+        all_vms_with_cdrom: "{{ vms_with_cdrom }}"
       block:
         - name: Detach CD-ROM devices from virtual machines
           register: detachment_result
