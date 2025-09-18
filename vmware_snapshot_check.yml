@@ -1,0 +1,24 @@
+---
+
+- name: Detach CD drives from VMWare virtual machines
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    vcenter_validate_certs: false
+  
+  module_defaults:
+    group/vmware.vmware_rest.all:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      vcenter_username: "{{ vcenter_username }}"  
+      vcenter_password: "{{ vcenter_password }}"
+      vcenter_validate_certs: "{{ vcenter_validate_certs }}"
+
+  tasks:
+    - name: Get vCenter session information
+      register: session_info
+      vmware.vmware_rest.vcenter_session:
+
+    - name: Display connection status
+      ansible.builtin.debug:
+        msg: "Successfully connected to vCenter: {{ vcenter_hostname }}"
