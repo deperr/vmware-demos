@@ -1,0 +1,30 @@
+---
+
+- name: Check VMWare guests for attached CD drives
+  hosts: localhost
+  become: true
+
+  vars:
+    vcenter_validate_certs: true
+    report_only: false
+    
+    # Report server configuration
+    report_server_user: ansible
+    # report_server_key: /path/to/private/key (optional - uses default SSH key if not specified)
+    
+  module_defaults:
+    group/vmware.vmware_rest.all:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      vcenter_username: "{{ vcenter_username }}"  
+      vcenter_password: "{{ vcenter_password }}"
+      vcenter_validate_certs: "{{ vcenter_validate_certs }}"
+
+  tasks:
+
+    - name: Get session information from vCenter
+      register: session_info
+      vmware.vmware_rest.vcenter_session:
+
+    - name: Display connection status
+      ansible.builtin.debug:
+        msg: "Successfully connected to vCenter: {{ vcenter_hostname }}"
