@@ -46,3 +46,16 @@
         msg: 
           - "Found {{ vms_with_cdrom | length }} VMs with CD-ROM devices attached"
           - "VMs with CD-ROM: {{ vms_with_cdrom | map(attribute='vm_name') | list }}"
+
+    - name: Create detailed CD-ROM inventory
+      when: vms_with_cdrom | length > 0
+      loop: "{{ vms_with_cdrom }}"
+      loop_control:
+        loop_var: vm_with_cdrom
+        label: "{{ vm_with_cdrom.vm_name }}"
+      ansible.builtin.debug:
+        msg:
+          - "VM: {{ vm_with_cdrom.vm_name }} ({{ vm_with_cdrom.vm_id }})"
+          - "Power State: {{ vm_with_cdrom.power_state }}"
+          - "CD-ROM Devices: {{ vm_with_cdrom.cdrom_devices | length }}"
+          - "Device Details: {{ vm_with_cdrom.cdrom_devices }}"
