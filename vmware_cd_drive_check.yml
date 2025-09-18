@@ -63,7 +63,6 @@
     - name: Kick off the process CD-ROM detachment
       when: 
         - vms_with_cdrom | length > 0
-        - not report_only | bool
       block:
         - name: Detach CD-ROM devices from virtual machines
           register: detachment_result
