@@ -67,12 +67,12 @@
         - name: Detach CD-ROM devices from virtual machines
           register: detachment_result
           failed_when: false
-          when: not ansible_check_mode
           loop: "{{ vms_with_cdrom | subelements('cdrom_devices') }}"
           loop_control:
             loop_var: cdrom_item
             label: "{{ cdrom_item.0.vm_name }} - CDROM {{ cdrom_item.1.cdrom }}"
           vmware.vmware_rest.vcenter_vm_hardware_cdrom:
+            allow_guest_control: true
             vm: "{{ cdrom_item.0.vm_id }}"
             cdrom: "{{ cdrom_item.1.cdrom }}"
             state: disconnect # this can be set to absent to remove the drive
