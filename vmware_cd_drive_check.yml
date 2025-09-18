@@ -13,7 +13,7 @@
     # report_server_key: /path/to/private/key (optional - uses default SSH key if not specified)
     
   module_defaults:
-    group/vmware.vmware_rest.all:
+    vmware.vmware_rest.all:
       vcenter_hostname: "{{ vcenter_hostname }}"
       vcenter_username: "{{ vcenter_username }}"  
       vcenter_password: "{{ vcenter_password }}"
