@@ -1,6 +1,5 @@
 ---
 
-# Play 1: VMware Discovery
 - name: Discover VMs with attached CD drives (Alternative Multi-Task Approach)
   hosts: localhost
   gather_facts: false
@@ -62,28 +61,10 @@
           - "CD-ROM Devices: {{ vm_with_cdrom.cdrom_devices | length }}"
           - "Device Details: {{ vm_with_cdrom.cdrom_devices }}"
 
-    - name: Create dynamic inventory for powered-on VMs
-      when: vms_with_cdrom | length > 0
-      loop: "{{ vms_with_cdrom | selectattr('power_state', 'equalto', 'POWERED_ON') | list }}"
-      loop_control:
-        loop_var: vm_item
-      ansible.builtin.add_host:
-        name: "{{ vm_item.vm_name }}"
-        groups: linux_vms_with_cdrom_alt
-        vm_id: "{{ vm_item.vm_id }}"
-        cdrom_devices: "{{ vm_item.cdrom_devices }}"
-
-    - name: Set fact for all VMs with CD-ROM for later use
-      ansible.builtin.set_fact:
-        all_vms_with_cdrom: "{{ vms_with_cdrom }}"
-
-# Play 2: Linux VM Operations  
 - name: Dismount CD drives from Linux VMs using multiple discrete tasks
-  hosts: linux_vms_with_cdrom_alt
+  hosts: vms_with_cdrom
   gather_facts: false
   become: true
-  vars:
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 
   tasks:
 
@@ -262,7 +243,6 @@
           Ready for VMware detachment: {{ final_mount_check.rc == 0 }}
           ================================================
 
-# Play 3: VMware Detachment
 - name: Detach CD-ROM devices from VMware
   hosts: localhost
   gather_facts: false
