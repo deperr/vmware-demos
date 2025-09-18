@@ -1,8 +1,11 @@
 ---
 
-- name: Check VMWare guests for attached CD drives (Alternative with multiple tasks)
+# Play 1: VMware Discovery
+- name: Discover VMs with attached CD drives (Alternative Multi-Task Approach)
   hosts: localhost
-  become: true
+  gather_facts: false
+  vars:
+    vms_with_cdrom: []
 
   tasks:
 
@@ -17,7 +20,6 @@
     - name: Initialize variables for CD-ROM tracking
       ansible.builtin.set_fact:
         vms_with_cdrom: []
-        cdrom_detachment_results: []
         current_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
 
     - name: Check each VM for CD-ROM devices
@@ -60,101 +62,137 @@
           - "CD-ROM Devices: {{ vm_with_cdrom.cdrom_devices | length }}"
           - "Device Details: {{ vm_with_cdrom.cdrom_devices }}"
 
-    # ===== CD-ROM Dismount Process (Multiple Task Approach) =====
-    
-    - name: Check if /dev/sr0 exists on target VMs
-      when: 
-        - vms_with_cdrom | length > 0
-        - vm_with_cdrom.power_state == "POWERED_ON"
+    - name: Create dynamic inventory for powered-on VMs
+      when: vms_with_cdrom | length > 0
+      loop: "{{ vms_with_cdrom | selectattr('power_state', 'equalto', 'POWERED_ON') | list }}"
+      loop_control:
+        loop_var: vm_item
+      ansible.builtin.add_host:
+        name: "{{ vm_item.vm_name }}"
+        groups: linux_vms_with_cdrom_alt
+        vm_id: "{{ vm_item.vm_id }}"
+        cdrom_devices: "{{ vm_item.cdrom_devices }}"
+
+    - name: Set fact for all VMs with CD-ROM for later use
+      ansible.builtin.set_fact:
+        all_vms_with_cdrom: "{{ vms_with_cdrom }}"
+
+# Play 2: Linux VM Operations  
+- name: Dismount CD drives from Linux VMs using multiple discrete tasks
+  hosts: linux_vms_with_cdrom_alt
+  gather_facts: false
+  become: true
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+  tasks:
+
+    - name: Check if /dev/sr0 exists on this VM
       register: sr0_check
       failed_when: false
-      loop: "{{ vms_with_cdrom }}"
-      loop_control:
-        loop_var: vm_with_cdrom
-        label: "{{ vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.stat:
         path: /dev/sr0
 
+    - name: Display /dev/sr0 device status
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ inventory_hostname }}
+          /dev/sr0 exists: {{ sr0_check.stat.exists | default(false) }}
+
     - name: Check mount status of /dev/sr0
-      when: 
-        - vms_with_cdrom | length > 0
-        - vm_with_cdrom.power_state == "POWERED_ON"
-        - sr0_result.stat.exists | default(false)
+      when: sr0_check.stat.exists | default(false)
       register: mount_check
       failed_when: false
-      loop: "{{ sr0_check.results | default([]) }}"
-      loop_control:
-        loop_var: sr0_result
-        label: "{{ sr0_result.vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ sr0_result.vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.shell: mount | grep "/dev/sr0" || echo "NOT_MOUNTED"
 
-    - name: Identify processes using CD-ROM mount points
+    - name: Display mount status
+      when: sr0_check.stat.exists | default(false)
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ inventory_hostname }}
+          Mount check result: {{ mount_check.stdout | default('Device not found') }}
+          Is mounted: {{ "/dev/sr0" in (mount_check.stdout | default("")) }}
+
+    - name: Get mount point for /dev/sr0
       when: 
-        - mount_check is defined
-        - mount_result.stdout is defined
-        - mount_result.stdout != "NOT_MOUNTED"
-        - '"/dev/sr0" in mount_result.stdout'
+        - sr0_check.stat.exists | default(false)
+        - mount_check.stdout is defined
+        - mount_check.stdout != "NOT_MOUNTED"
+        - '"/dev/sr0" in mount_check.stdout'
+      register: mount_point_check
+      ansible.builtin.shell: echo "{{ mount_check.stdout }}" | awk '{print $3}' | head -n1
+
+    - name: Identify processes using CD-ROM mount point
+      when: 
+        - sr0_check.stat.exists | default(false)
+        - mount_point_check is defined
+        - mount_point_check.stdout is defined
+        - mount_point_check.stdout | length > 0
       register: lsof_check
       failed_when: false
-      loop: "{{ mount_check.results | default([]) }}"
-      loop_control:
-        loop_var: mount_result
-        label: "{{ mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.shell: |
-        mount_point=$(echo "{{ mount_result.stdout }}" | awk '{print $3}' | head -n1)
+        mount_point="{{ mount_point_check.stdout }}"
         if [ -n "$mount_point" ]; then
+          echo "Checking processes using: $mount_point"
           lsof "$mount_point" 2>/dev/null || echo "NO_PROCESSES"
         else
           echo "NO_MOUNT_POINT"
         fi
 
-    - name: Kill processes using CD-ROM mount points
+    - name: Display processes using mount point
       when: 
         - lsof_check is defined
-        - lsof_result.stdout is defined
-        - lsof_result.stdout != "NO_PROCESSES"
-        - lsof_result.stdout != "NO_MOUNT_POINT"
-      failed_when: false
-      loop: "{{ lsof_check.results | default([]) }}"
-      loop_control:
-        loop_var: lsof_result
-        label: "{{ lsof_result.mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ lsof_result.mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-      ansible.builtin.shell: |
-        mount_point=$(echo "{{ lsof_result.mount_result.stdout }}" | awk '{print $3}' | head -n1)
-        echo "Killing processes using $mount_point"
-        lsof -t "$mount_point" 2>/dev/null | xargs -r kill -TERM 2>/dev/null || true
-        sleep 2
-        lsof -t "$mount_point" 2>/dev/null | xargs -r kill -KILL 2>/dev/null || true
+        - lsof_check.stdout is defined
+        - lsof_check.stdout != "NO_PROCESSES"
+        - lsof_check.stdout != "NO_MOUNT_POINT"
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ inventory_hostname }}
+          Processes using mount point:
+          {{ lsof_check.stdout }}
 
-    - name: Unmount /dev/sr0 from Linux systems
+    - name: Kill processes using CD-ROM mount point
       when: 
-        - mount_check is defined
-        - mount_result.stdout is defined
-        - mount_result.stdout != "NOT_MOUNTED"
-        - '"/dev/sr0" in mount_result.stdout'
+        - lsof_check is defined
+        - lsof_check.stdout is defined
+        - lsof_check.stdout != "NO_PROCESSES"
+        - lsof_check.stdout != "NO_MOUNT_POINT"
+        - '"COMMAND" in lsof_check.stdout'  # lsof output contains actual processes
+      failed_when: false
+      ansible.builtin.shell: |
+        mount_point="{{ mount_point_check.stdout }}"
+        echo "Attempting to kill processes using $mount_point"
+        
+        # Try graceful termination first
+        pids=$(lsof -t "$mount_point" 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+          echo "Sending TERM signal to PIDs: $pids"
+          echo "$pids" | xargs -r kill -TERM 2>/dev/null || true
+          sleep 2
+          
+          # Force kill if still running
+          pids=$(lsof -t "$mount_point" 2>/dev/null || true)
+          if [ -n "$pids" ]; then
+            echo "Sending KILL signal to remaining PIDs: $pids"
+            echo "$pids" | xargs -r kill -KILL 2>/dev/null || true
+            sleep 1
+          fi
+          echo "Process cleanup completed"
+        else
+          echo "No processes found to kill"
+        fi
+
+    - name: Attempt to unmount /dev/sr0
+      when: 
+        - sr0_check.stat.exists | default(false)
+        - mount_check.stdout is defined
+        - mount_check.stdout != "NOT_MOUNTED"
+        - '"/dev/sr0" in mount_check.stdout'
       register: unmount_result
       failed_when: false
-      loop: "{{ mount_check.results | default([]) }}"
-      loop_control:
-        loop_var: mount_result
-        label: "{{ mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ mount_result.sr0_result.vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.shell: |
-        echo "Attempting to unmount /dev/sr0..."
+        echo "=== Unmounting /dev/sr0 ==="
+        echo "Attempting regular unmount..."
         if umount /dev/sr0 2>/dev/null; then
           echo "SUCCESS: Regular unmount successful"
           exit 0
@@ -169,20 +207,20 @@
           fi
         fi
 
-    - name: Eject CD-ROM media
-      when: 
-        - sr0_check is defined
-        - sr0_result.stat.exists | default(false)
+    - name: Display unmount results
+      when: unmount_result is defined
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ inventory_hostname }}
+          Unmount result: {{ unmount_result.stdout }}
+          Unmount success: {{ unmount_result.rc == 0 }}
+
+    - name: Attempt to eject CD-ROM media
+      when: sr0_check.stat.exists | default(false)
       register: eject_result
       failed_when: false
-      loop: "{{ sr0_check.results | default([]) }}"
-      loop_control:
-        loop_var: sr0_result
-        label: "{{ sr0_result.vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ sr0_result.vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.shell: |
+        echo "=== Ejecting CD-ROM Media ==="
         if command -v eject >/dev/null 2>&1; then
           echo "Attempting to eject /dev/sr0..."
           if eject /dev/sr0 2>/dev/null; then
@@ -194,60 +232,115 @@
           echo "INFO: eject command not available"
         fi
 
+    - name: Display eject results
+      when: eject_result is defined
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ inventory_hostname }}
+          Eject result: {{ eject_result.stdout }}
+
     - name: Verify final mount status
-      when: 
-        - vms_with_cdrom | length > 0
-        - vm_with_cdrom.power_state == "POWERED_ON"
       register: final_mount_check
       failed_when: false
-      loop: "{{ vms_with_cdrom }}"
-      loop_control:
-        loop_var: vm_with_cdrom
-        label: "{{ vm_with_cdrom.vm_name }}"
-      delegate_to: "{{ vm_with_cdrom.vm_name }}"
-      vars:
-        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
       ansible.builtin.shell: |
+        echo "=== Final Mount Status Check ==="
         if mount | grep -q "/dev/sr0"; then
-          echo "STILL_MOUNTED: $(mount | grep /dev/sr0)"
+          echo "WARNING: /dev/sr0 is still mounted:"
+          mount | grep "/dev/sr0"
           exit 1
         else
           echo "SUCCESS: /dev/sr0 is not mounted - ready for VMware detachment"
           exit 0
         fi
 
-    - name: Display dismount results summary
-      when: final_mount_check is defined
-      loop: "{{ final_mount_check.results | default([]) }}"
-      loop_control:
-        loop_var: final_result
-        label: "{{ final_result.vm_with_cdrom.vm_name }}"
+    - name: Display final status
       ansible.builtin.debug:
         msg: |
-          VM: {{ final_result.vm_with_cdrom.vm_name }}
-          Final Status: {{ final_result.stdout }}
-          Return Code: {{ final_result.rc }}
+          ===== FINAL STATUS for {{ inventory_hostname }} =====
+          Device exists: {{ sr0_check.stat.exists | default(false) }}
+          Final mount status: {{ final_mount_check.stdout }}
+          Ready for VMware detachment: {{ final_mount_check.rc == 0 }}
+          ================================================
+
+# Play 3: VMware Detachment
+- name: Detach CD-ROM devices from VMware
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+
+    - name: Display summary of VMs processed
+      when: groups['linux_vms_with_cdrom_alt'] | default([]) | length > 0
+      ansible.builtin.debug:
+        msg: |
+          ===== DISMOUNT PHASE COMPLETED =====
+          VMs processed for dismount: {{ groups['linux_vms_with_cdrom_alt'] | default([]) | length }}
+          VMs: {{ groups['linux_vms_with_cdrom_alt'] | default([]) | join(', ') }}
+          
+          Proceeding with VMware detachment...
 
     - name: Wait for dismount operations to stabilize
-      when: vms_with_cdrom | length > 0
+      when: groups['linux_vms_with_cdrom_alt'] | default([]) | length > 0
       ansible.builtin.pause:
         seconds: 5
         prompt: "Waiting for CD dismount operations to complete before attempting VMware detachment"
 
-    # ===== VMware Detachment Process =====
-    
-    - name: Kick off the process CD-ROM detachment
+    - name: Detach CD-ROM devices from virtual machines
+      when: hostvars['localhost']['all_vms_with_cdrom'] is defined
+      register: detachment_result
+      failed_when: false
+      loop: "{{ hostvars['localhost']['all_vms_with_cdrom'] | subelements('cdrom_devices') }}"
+      loop_control:
+        loop_var: cdrom_item
+        label: "{{ cdrom_item.0.vm_name }} - CDROM {{ cdrom_item.1.cdrom }}"
+      vmware.vmware_rest.vcenter_vm_hardware_cdrom:
+        vm: "{{ cdrom_item.0.vm_id }}"
+        cdrom: "{{ cdrom_item.1.cdrom }}"
+        state: disconnect # this can be set to absent to remove the drive
+
+    - name: Display detailed detachment results
+      when: detachment_result is defined
+      loop: "{{ detachment_result.results | default([]) }}"
+      loop_control:
+        loop_var: result_item
+        label: "{{ result_item.cdrom_item.0.vm_name }}"
+      ansible.builtin.debug:
+        msg: |
+          ===== VMware Detachment Result =====
+          VM: {{ result_item.cdrom_item.0.vm_name }}
+          CD-ROM ID: {{ result_item.cdrom_item.1.cdrom }}
+          Detachment Status: {{ 'SUCCESS' if not result_item.failed else 'FAILED' }}
+          {% if result_item.failed %}Error: {{ result_item.msg | default('Unknown error') }}{% endif %}
+          ====================================
+
+    - name: Generate comprehensive final report
       when: 
-        - vms_with_cdrom | length > 0
-      block:
-        - name: Detach CD-ROM devices from virtual machines
-          register: detachment_result
-          failed_when: false
-          loop: "{{ vms_with_cdrom | subelements('cdrom_devices') }}"
-          loop_control:
-            loop_var: cdrom_item
-            label: "{{ cdrom_item.0.vm_name }} - CDROM {{ cdrom_item.1.cdrom }}"
-          vmware.vmware_rest.vcenter_vm_hardware_cdrom:
-            vm: "{{ cdrom_item.0.vm_id }}"
-            cdrom: "{{ cdrom_item.1.cdrom }}"
-            state: disconnect # this can be set to absent to remove the drive
+        - hostvars['localhost']['all_vms_with_cdrom'] is defined
+        - detachment_result is defined
+      ansible.builtin.debug:
+        msg: |
+          ===== COMPLETE CD-ROM MANAGEMENT REPORT (MULTI-TASK APPROACH) =====
+          Execution Timestamp: {{ hostvars['localhost']['current_timestamp'] }}
+          
+          DISCOVERY PHASE:
+          - Total VMs scanned: {{ hostvars['localhost']['all_vms_with_cdrom'] | length if hostvars['localhost']['all_vms_with_cdrom'] is defined else 0 }}
+          - VMs with CD-ROM devices: {{ hostvars['localhost']['all_vms_with_cdrom'] | length }}
+          
+          DISMOUNT PHASE:
+          - Powered-on VMs processed: {{ groups['linux_vms_with_cdrom_alt'] | default([]) | length }}
+          - Dismount approach: Multiple discrete tasks per VM
+          
+          DETACHMENT PHASE:
+          - Total detachment attempts: {{ detachment_result.results | length }}
+          - Successful detachments: {{ detachment_result.results | selectattr('failed', 'equalto', false) | list | length }}
+          - Failed detachments: {{ detachment_result.results | selectattr('failed', 'equalto', true) | list | length }}
+          
+          {% if detachment_result.results | selectattr('failed', 'equalto', true) | list | length > 0 %}
+          FAILED DETACHMENTS REQUIRING ATTENTION:
+          {% for failed_item in detachment_result.results | selectattr('failed', 'equalto', true) | list %}
+          - {{ failed_item.cdrom_item.0.vm_name }}: {{ failed_item.msg | default('Unknown error') }}
+          {% endfor %}
+          {% endif %}
+          
+          MULTI-TASK APPROACH COMPLETED SUCCESSFULLY
+          =========================================================
