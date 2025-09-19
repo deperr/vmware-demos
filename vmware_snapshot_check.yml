@@ -22,12 +22,12 @@
     #     fail_msg: "Missing required vCenter connection parameters or invalid snapshot_age_days"
     #     success_msg: "Required parameters validated successfully"
 
-    - name: Display connection status and configuration
-      ansible.builtin.debug:
-        msg: 
-          - "Successfully connected to vCenter: {{ vcenter_hostname }}"
-          - "Snapshot age threshold: {{ snapshot_age_days }} days"
-          - "Dry run mode: {{ dry_run }}"
+    # - name: Display connection status and configuration
+    #   ansible.builtin.debug:
+    #     msg: 
+    #       - "Successfully connected to vCenter: {{ vcenter_hostname }}"
+    #       - "Snapshot age threshold: {{ snapshot_age_days }} days"
+    #       - "Dry run mode: {{ dry_run }}"
 
     - name: Initialize variables for snapshot tracking
       ansible.builtin.set_fact:
