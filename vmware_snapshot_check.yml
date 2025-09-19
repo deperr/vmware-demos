@@ -108,7 +108,7 @@
       loop_control:
         loop_var: snapshot_item
         label: "{{ snapshot_item.0.vm_name }} - {{ snapshot_item.1.name }}"
-      vmware.vmware_rest.vcenter_vm_snapshot:
+      vmware.vmware.vm_snapshot:
         vm: "{{ snapshot_item.0.vm_id }}"
         snapshot: "{{ snapshot_item.1.snapshot }}"
         state: absent
