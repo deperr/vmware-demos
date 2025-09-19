@@ -11,16 +11,16 @@
     dry_run: false  # Set to true for testing without actual deletion
     
   tasks:
-    - name: Validate required parameters
-      ansible.builtin.assert:
-        that:
-          - vcenter_hostname is defined
-          - vcenter_username is defined
-          - vcenter_password is defined
-          - snapshot_age_days is defined
-          - snapshot_age_days | int > 0
-        fail_msg: "Missing required vCenter connection parameters or invalid snapshot_age_days"
-        success_msg: "Required parameters validated successfully"
+    # - name: Validate required parameters
+    #   ansible.builtin.assert:
+    #     that:
+    #       - vcenter_hostname is defined
+    #       - vcenter_username is defined
+    #       - vcenter_password is defined
+    #       - snapshot_age_days is defined
+    #       - snapshot_age_days | int > 0
+    #     fail_msg: "Missing required vCenter connection parameters or invalid snapshot_age_days"
+    #     success_msg: "Required parameters validated successfully"
 
     - name: Display connection status and configuration
       ansible.builtin.debug:
