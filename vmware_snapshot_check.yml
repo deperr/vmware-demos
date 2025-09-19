@@ -51,7 +51,7 @@
       loop_control:
         loop_var: vm_item
         label: "{{ vm_item.name }}"
-      failed_when: false  # Continue even if some VMs fail
+      failed_when: false
       community.vmware.vmware_guest_snapshot_info:
         vm: "{{ vm_item.vm }}"
 
@@ -98,77 +98,77 @@
           - "Old Snapshots to Remove: {{ vm_with_old_snapshots.old_snapshots | length }}"
           - "Old Snapshot Details: {{ vm_with_old_snapshots.old_snapshots | map(attribute='name') | list }}"
 
-    - name: Remove old snapshots (when not in dry run mode)
-      when: 
-        - not dry_run
-        - vms_with_old_snapshots | length > 0
-      register: snapshot_removal_result
-      failed_when: false  # Continue processing other snapshots even if some fail
-      loop: "{{ vms_with_old_snapshots | subelements('old_snapshots') }}"
-      loop_control:
-        loop_var: snapshot_item
-        label: "{{ snapshot_item.0.vm_name }} - {{ snapshot_item.1.name }}"
-      vmware.vmware.vm_snapshot:
-        vm: "{{ snapshot_item.0.vm_id }}"
-        snapshot: "{{ snapshot_item.1.snapshot }}"
-        state: absent
+    # - name: Remove old snapshots (when not in dry run mode)
+    #   when: 
+    #     - not dry_run
+    #     - vms_with_old_snapshots | length > 0
+    #   register: snapshot_removal_result
+    #   failed_when: false  # Continue processing other snapshots even if some fail
+    #   loop: "{{ vms_with_old_snapshots | subelements('old_snapshots') }}"
+    #   loop_control:
+    #     loop_var: snapshot_item
+    #     label: "{{ snapshot_item.0.vm_name }} - {{ snapshot_item.1.name }}"
+    #   vmware.vmware.vm_snapshot:
+    #     vm: "{{ snapshot_item.0.vm_id }}"
+    #     snapshot: "{{ snapshot_item.1.snapshot }}"
+    #     state: absent
 
-    - name: Display snapshot removal results
-      when: 
-        - not dry_run
-        - snapshot_removal_result is defined
-      loop: "{{ snapshot_removal_result.results | default([]) }}"
-      loop_control:
-        loop_var: removal_result
-        label: "{{ removal_result.snapshot_item.0.vm_name }}"
-      ansible.builtin.debug:
-        msg: |
-          VM: {{ removal_result.snapshot_item.0.vm_name }}
-          Snapshot: {{ removal_result.snapshot_item.1.name }}
-          Status: {{ 'SUCCESS' if removal_result.failed == false else 'FAILED' }}
-          {% if removal_result.failed %}Error: {{ removal_result.msg | default('Unknown error') }}{% endif %}
+    # - name: Display snapshot removal results
+    #   when: 
+    #     - not dry_run
+    #     - snapshot_removal_result is defined
+    #   loop: "{{ snapshot_removal_result.results | default([]) }}"
+    #   loop_control:
+    #     loop_var: removal_result
+    #     label: "{{ removal_result.snapshot_item.0.vm_name }}"
+    #   ansible.builtin.debug:
+    #     msg: |
+    #       VM: {{ removal_result.snapshot_item.0.vm_name }}
+    #       Snapshot: {{ removal_result.snapshot_item.1.name }}
+    #       Status: {{ 'SUCCESS' if removal_result.failed == false else 'FAILED' }}
+    #       {% if removal_result.failed %}Error: {{ removal_result.msg | default('Unknown error') }}{% endif %}
 
-    - name: Generate final summary report
-      ansible.builtin.set_fact:
-        final_summary:
-          execution_timestamp: "{{ current_timestamp }}"
-          vcenter_host: "{{ vcenter_hostname }}"
-          snapshot_age_threshold_days: "{{ snapshot_age_days }}"
-          dry_run_mode: "{{ dry_run }}"
-          total_vms_scanned: "{{ all_vms.value | length }}"
-          vms_with_old_snapshots: "{{ vms_with_old_snapshots | length }}"
-          total_old_snapshots_found: "{{ vms_with_old_snapshots | map(attribute='old_snapshots') | map('length') | sum }}"
-          snapshots_removed: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', false) | list | length) }}"
-          removal_failures: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', true) | list | length) }}"
+    # - name: Generate final summary report
+    #   ansible.builtin.set_fact:
+    #     final_summary:
+    #       execution_timestamp: "{{ current_timestamp }}"
+    #       vcenter_host: "{{ vcenter_hostname }}"
+    #       snapshot_age_threshold_days: "{{ snapshot_age_days }}"
+    #       dry_run_mode: "{{ dry_run }}"
+    #       total_vms_scanned: "{{ all_vms.value | length }}"
+    #       vms_with_old_snapshots: "{{ vms_with_old_snapshots | length }}"
+    #       total_old_snapshots_found: "{{ vms_with_old_snapshots | map(attribute='old_snapshots') | map('length') | sum }}"
+    #       snapshots_removed: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', false) | list | length) }}"
+    #       removal_failures: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', true) | list | length) }}"
 
-    - name: Display final execution summary
-      ansible.builtin.debug:
-        msg: |
-          ===== VMware Snapshot Cleanup Summary =====
-          Execution Time: {{ final_summary.execution_timestamp }}
-          vCenter Host: {{ final_summary.vcenter_host }}
-          Snapshot Age Threshold: {{ final_summary.snapshot_age_threshold_days }} days
-          Dry Run Mode: {{ final_summary.dry_run_mode }}
+    # - name: Display final execution summary
+    #   ansible.builtin.debug:
+    #     msg: |
+    #       ===== VMware Snapshot Cleanup Summary =====
+    #       Execution Time: {{ final_summary.execution_timestamp }}
+    #       vCenter Host: {{ final_summary.vcenter_host }}
+    #       Snapshot Age Threshold: {{ final_summary.snapshot_age_threshold_days }} days
+    #       Dry Run Mode: {{ final_summary.dry_run_mode }}
           
-          Scan Results:
-          - Total VMs Scanned: {{ final_summary.total_vms_scanned }}
-          - VMs with Old Snapshots: {{ final_summary.vms_with_old_snapshots }}
-          - Total Old Snapshots Found: {{ final_summary.total_old_snapshots_found }}
+    #       Scan Results:
+    #       - Total VMs Scanned: {{ final_summary.total_vms_scanned }}
+    #       - VMs with Old Snapshots: {{ final_summary.vms_with_old_snapshots }}
+    #       - Total Old Snapshots Found: {{ final_summary.total_old_snapshots_found }}
           
-          {% if not dry_run %}
-          Removal Results:
-          - Snapshots Successfully Removed: {{ final_summary.snapshots_removed }}
-          - Removal Failures: {{ final_summary.removal_failures }}
-          {% else %}
-          NOTE: Dry run mode enabled - no snapshots were actually removed
-          {% endif %}
+    #       {% if not dry_run %}
+    #       Removal Results:
+    #       - Snapshots Successfully Removed: {{ final_summary.snapshots_removed }}
+    #       - Removal Failures: {{ final_summary.removal_failures }}
+    #       {% else %}
+    #       NOTE: Dry run mode enabled - no snapshots were actually removed
+    #       {% endif %}
 
-    - name: Save summary to workflow artifacts (for AAP integration)
-      ansible.builtin.set_stats:
-        data:
-          snapshot_cleanup_summary: "{{ final_summary }}"
-          vms_with_old_snapshots_count: "{{ final_summary.vms_with_old_snapshots }}"
-          snapshots_removed_count: "{{ final_summary.snapshots_removed }}"
-          execution_status: "{{ 'completed' if final_summary.removal_failures == 0 else 'completed_with_errors' }}"
-        per_host: false
-        aggregate: true
+    # - name: Save summary to workflow artifacts (for AAP integration)
+    #   ansible.builtin.set_stats:
+    #     data:
+    #       snapshot_cleanup_summary: "{{ final_summary }}"
+    #       vms_with_old_snapshots_count: "{{ final_summary.vms_with_old_snapshots }}"
+    #       snapshots_removed_count: "{{ final_summary.snapshots_removed }}"
+    #       execution_status: "{{ 'completed' if final_summary.removal_failures == 0 else 'completed_with_errors' }}"
+    #     per_host: false
+    #     aggregate: true
