@@ -10,13 +10,6 @@
     snapshot_age_days: 30  # Default age threshold - can be overridden
     dry_run: false  # Set to true for testing without actual deletion
     
-  module_defaults:
-    group/vmware.vmware_rest.all:
-      vcenter_hostname: "{{ vcenter_hostname }}"
-      vcenter_username: "{{ vcenter_username }}"  
-      vcenter_password: "{{ vcenter_password }}"
-      vcenter_validate_certs: "{{ vcenter_validate_certs }}"
-
   tasks:
     - name: Validate required parameters
       ansible.builtin.assert:
