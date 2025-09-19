@@ -52,7 +52,7 @@
         loop_var: vm_item
         label: "{{ vm_item.name }}"
       failed_when: false  # Continue even if some VMs fail
-      community.vmware_rest.vcenter_vm_snapshot_info:
+      community.vmware.vmware_guest_snapshot_info:
         vm: "{{ vm_item.vm }}"
 
     - name: Process snapshot information and identify old snapshots
