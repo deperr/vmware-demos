@@ -1,12 +1,15 @@
 ---
 
-- name: Detach CD drives from VMWare virtual machines
+- name: Remove VMware snapshots older than specified age
   hosts: localhost
   gather_facts: false
 
   vars:
+    # Configuration variables
     vcenter_validate_certs: false
-  
+    snapshot_age_days: 30  # Default age threshold - can be overridden
+    dry_run: false  # Set to true for testing without actual deletion
+    
   module_defaults:
     group/vmware.vmware_rest.all:
       vcenter_hostname: "{{ vcenter_hostname }}"
@@ -15,43 +18,164 @@
       vcenter_validate_certs: "{{ vcenter_validate_certs }}"
 
   tasks:
-    - name: Get vCenter session information
-      register: session_info
-      vmware.vmware_rest.vcenter_session:
+    - name: Validate required parameters
+      ansible.builtin.assert:
+        that:
+          - vcenter_hostname is defined
+          - vcenter_username is defined
+          - vcenter_password is defined
+          - snapshot_age_days is defined
+          - snapshot_age_days | int > 0
+        fail_msg: "Missing required vCenter connection parameters or invalid snapshot_age_days"
+        success_msg: "Required parameters validated successfully"
 
-    - name: Display connection status
+    - name: Display connection status and configuration
       ansible.builtin.debug:
-        msg: "Successfully connected to vCenter: {{ vcenter_hostname }}"
+        msg: 
+          - "Successfully connected to vCenter: {{ vcenter_hostname }}"
+          - "Snapshot age threshold: {{ snapshot_age_days }} days"
+          - "Dry run mode: {{ dry_run }}"
 
-    - name: Initialize variables for CD-ROM tracking
+    - name: Initialize variables for snapshot tracking
       ansible.builtin.set_fact:
-        vms_with_cdrom: []
-        cdrom_detachment_results: []
+        vms_with_old_snapshots: []
+        snapshot_removal_results: []
         current_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+        # Calculate threshold timestamp (current time - snapshot_age_days)
+        threshold_timestamp: "{{ (lookup('pipe', 'date -u -d \"' + snapshot_age_days|string + ' days ago\" +%s') | int) }}"
 
-    - name: Check each VM for CD-ROM devices
-      register: vm_cdrom_check
+    - name: Retrieve all virtual machines from vCenter
+      register: all_vms
+      vmware.vmware_rest.vcenter_vm_info:
+
+    - name: Display total VM count
+      ansible.builtin.debug:
+        msg: "Found {{ all_vms.value | length }} virtual machines in vCenter"
+
+    - name: Get snapshot information for each VM
+      register: vm_snapshots_check
       loop: "{{ all_vms.value }}"
       loop_control:
         loop_var: vm_item
         label: "{{ vm_item.name }}"
-      vmware.vmware_rest.vcenter_vm_hardware_cdrom_info:
+      failed_when: false  # Continue even if some VMs fail
+      vmware.vmware_rest.vcenter_vm_snapshot_info:
         vm: "{{ vm_item.vm }}"
 
-    - name: Identify VMs with CD-ROM devices attached
+    - name: Process snapshot information and identify old snapshots
       when: 
-        - vm_cdrom_check.results is defined
-        - cdrom_result.value is defined
-        - cdrom_result.value | length > 0
-      loop: "{{ vm_cdrom_check.results }}"
+        - snapshot_result.value is defined
+        - snapshot_result.value | length > 0
+        - old_snapshots | length > 0
+      loop: "{{ vm_snapshots_check.results }}"
       loop_control:
-        loop_var: cdrom_result
-        label: "{{ cdrom_result.vm_item.name }}"
+        loop_var: snapshot_result
+        label: "{{ snapshot_result.vm_item.name }}"
+      vars:
+        # Filter snapshots older than threshold
+        old_snapshots: "{{ snapshot_result.value | selectattr('create_time', 'defined') | 
+                          selectattr('create_time', 'lt', threshold_timestamp|int) | list }}"
+        vm_snapshot_data:
+          vm_id: "{{ snapshot_result.vm_item.vm }}"
+          vm_name: "{{ snapshot_result.vm_item.name }}"
+          power_state: "{{ snapshot_result.vm_item.power_state }}"
+          old_snapshots: "{{ old_snapshots }}"
+          total_snapshots: "{{ snapshot_result.value | length }}"
       ansible.builtin.set_fact:
-        vms_with_cdrom: "{{ vms_with_cdrom + [{'vm_id': cdrom_result.vm_item.vm, 'vm_name': cdrom_result.vm_item.name, 'power_state': cdrom_result.vm_item.power_state, 'cdrom_devices': cdrom_result.value}] }}"
+        vms_with_old_snapshots: "{{ vms_with_old_snapshots + [vm_snapshot_data] }}"
 
-    - name: Display VMs with CD-ROM devices
+    - name: Display summary of VMs with old snapshots
       ansible.builtin.debug:
         msg: 
-          - "Found {{ vms_with_cdrom | length }} VMs with CD-ROM devices attached"
-          - "VMs with CD-ROM: {{ vms_with_cdrom | map(attribute='vm_name') | list }}"
+          - "Found {{ vms_with_old_snapshots | length }} VMs with snapshots older than {{ snapshot_age_days }} days"
+          - "VMs with old snapshots: {{ vms_with_old_snapshots | map(attribute='vm_name') | list }}"
+          - "Total old snapshots to remove: {{ vms_with_old_snapshots | map(attribute='old_snapshots') | map('length') | sum }}"
+
+    - name: Display detailed old snapshot inventory
+      when: vms_with_old_snapshots | length > 0
+      loop: "{{ vms_with_old_snapshots }}"
+      loop_control:
+        loop_var: vm_with_old_snapshots
+        label: "{{ vm_with_old_snapshots.vm_name }}"
+      ansible.builtin.debug:
+        msg:
+          - "VM: {{ vm_with_old_snapshots.vm_name }} ({{ vm_with_old_snapshots.vm_id }})"
+          - "Power State: {{ vm_with_old_snapshots.power_state }}"
+          - "Total Snapshots: {{ vm_with_old_snapshots.total_snapshots }}"
+          - "Old Snapshots to Remove: {{ vm_with_old_snapshots.old_snapshots | length }}"
+          - "Old Snapshot Details: {{ vm_with_old_snapshots.old_snapshots | map(attribute='name') | list }}"
+
+    - name: Remove old snapshots (when not in dry run mode)
+      when: 
+        - not dry_run
+        - vms_with_old_snapshots | length > 0
+      register: snapshot_removal_result
+      failed_when: false  # Continue processing other snapshots even if some fail
+      loop: "{{ vms_with_old_snapshots | subelements('old_snapshots') }}"
+      loop_control:
+        loop_var: snapshot_item
+        label: "{{ snapshot_item.0.vm_name }} - {{ snapshot_item.1.name }}"
+      vmware.vmware_rest.vcenter_vm_snapshot:
+        vm: "{{ snapshot_item.0.vm_id }}"
+        snapshot: "{{ snapshot_item.1.snapshot }}"
+        state: absent
+
+    - name: Display snapshot removal results
+      when: 
+        - not dry_run
+        - snapshot_removal_result is defined
+      loop: "{{ snapshot_removal_result.results | default([]) }}"
+      loop_control:
+        loop_var: removal_result
+        label: "{{ removal_result.snapshot_item.0.vm_name }}"
+      ansible.builtin.debug:
+        msg: |
+          VM: {{ removal_result.snapshot_item.0.vm_name }}
+          Snapshot: {{ removal_result.snapshot_item.1.name }}
+          Status: {{ 'SUCCESS' if removal_result.failed == false else 'FAILED' }}
+          {% if removal_result.failed %}Error: {{ removal_result.msg | default('Unknown error') }}{% endif %}
+
+    - name: Generate final summary report
+      ansible.builtin.set_fact:
+        final_summary:
+          execution_timestamp: "{{ current_timestamp }}"
+          vcenter_host: "{{ vcenter_hostname }}"
+          snapshot_age_threshold_days: "{{ snapshot_age_days }}"
+          dry_run_mode: "{{ dry_run }}"
+          total_vms_scanned: "{{ all_vms.value | length }}"
+          vms_with_old_snapshots: "{{ vms_with_old_snapshots | length }}"
+          total_old_snapshots_found: "{{ vms_with_old_snapshots | map(attribute='old_snapshots') | map('length') | sum }}"
+          snapshots_removed: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', false) | list | length) }}"
+          removal_failures: "{{ 0 if dry_run else (snapshot_removal_result.results | default([]) | selectattr('failed', 'equalto', true) | list | length) }}"
+
+    - name: Display final execution summary
+      ansible.builtin.debug:
+        msg: |
+          ===== VMware Snapshot Cleanup Summary =====
+          Execution Time: {{ final_summary.execution_timestamp }}
+          vCenter Host: {{ final_summary.vcenter_host }}
+          Snapshot Age Threshold: {{ final_summary.snapshot_age_threshold_days }} days
+          Dry Run Mode: {{ final_summary.dry_run_mode }}
+          
+          Scan Results:
+          - Total VMs Scanned: {{ final_summary.total_vms_scanned }}
+          - VMs with Old Snapshots: {{ final_summary.vms_with_old_snapshots }}
+          - Total Old Snapshots Found: {{ final_summary.total_old_snapshots_found }}
+          
+          {% if not dry_run %}
+          Removal Results:
+          - Snapshots Successfully Removed: {{ final_summary.snapshots_removed }}
+          - Removal Failures: {{ final_summary.removal_failures }}
+          {% else %}
+          NOTE: Dry run mode enabled - no snapshots were actually removed
+          {% endif %}
+
+    - name: Save summary to workflow artifacts (for AAP integration)
+      ansible.builtin.set_stats:
+        data:
+          snapshot_cleanup_summary: "{{ final_summary }}"
+          vms_with_old_snapshots_count: "{{ final_summary.vms_with_old_snapshots }}"
+          snapshots_removed_count: "{{ final_summary.snapshots_removed }}"
+          execution_status: "{{ 'completed' if final_summary.removal_failures == 0 else 'completed_with_errors' }}"
+        per_host: false
+        aggregate: true
