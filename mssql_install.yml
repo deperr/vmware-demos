@@ -1,0 +1,16 @@
+---
+
+- hosts: db_servers
+  
+  vars_files:
+    - secrets.yml
+
+  vars:
+    mssql_accept_microsoft_odbc_driver_for_sql_server_eula: true
+    mssql_accept_microsoft_cli_utilities_for_sql_server_eula: true
+    mssql_accept_microsoft_sql_server_standard_eula: true
+    mssql_version: "{{ mssql_version }}"
+    mssql_password: "{{ mssql_pass }}"
+    mssql_edition: Evaluation
+  roles:
+    - microsoft.sql.server
