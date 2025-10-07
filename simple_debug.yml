@@ -1,0 +1,11 @@
+---
+
+- name: Show simple playbook editing from GitHub
+  hosts: db_servers
+  gather_facts: false
+
+  tasks:
+
+    - name: Print a debug message
+      ansible.builtin.debug:
+        msg: "The value is: foo"
